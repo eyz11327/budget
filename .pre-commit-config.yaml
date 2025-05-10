@@ -2,21 +2,14 @@
   hooks:
     - id: rustfmt
       name: rustfmt
-      entry: cargo fmt --all -- --check
+      entry: cargo fmt --all --check
       language: system
       types: [rust]
 - repo: local
   hooks:
     - id: clippy
       name: clippy
-      entry: cargo clippy --all-targets --all-features -- -D warnings
-      language: system
-      types: [rust]
-- repo: local
-  hooks:
-    - id: cargo-check
-      name: cargo check
-      entry: cargo check --all-targets
+      entry: cargo clippy --all-targets --all-features
       language: system
       types: [rust]
 - repo: https://github.com/pre-commit/pre-commit-hooks

@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use std::{error::Error, fs::File};
+use std::{error::Error, fs::File, collections::{HashSet, HashMap}, sync::LazyLock};
 
 #[derive(Debug)]
 struct BudgetRecord {
@@ -7,6 +7,86 @@ struct BudgetRecord {
     date: NaiveDate,
     card: String,
     description: String,
+}
+
+fn standardize_description(description: &str) -> String {
+    let raw_description = description.to_lowercase();
+    // Hard coded mapping of purchases that contain a UUID in them that I want to standardize
+    // TODO: Move to the database for persistence & easier long term management
+    static DESCRIPTION_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+        let mut map = HashMap::new();
+        
+        // Online Stores
+        map.insert("amazon", "amazon");
+        map.insert("amzn", "amazon");
+        map.insert("prime video", "tv");
+        map.insert("amc", "amc");
+        map.insert("petsmart", "petsmart");
+
+        // In Person Stores
+        map.insert("target", "target");
+        map.insert("the home depot", "home depot");
+        map.insert("rei", "rei");
+        map.insert("barnes & noble", "barnes & noble");
+        map.insert("autozone", "autozone");
+        map.insert("crate & barrel", "crate & barrel");
+        map.insert("vca animal hosp", "vca veterinarian");
+        map.insert("laz parking", "laz parking");
+        map.insert("spothero", "spothero");
+        map.insert("walgreens", "walgreens");
+        map.insert("831 bowlero", "bowlero");
+
+        // Airlines & Travel
+        map.insert("united", "united airlines");
+        map.insert("delta", "delta airlines");
+        map.insert("hilton", "hilton");
+        map.insert("airbnb", "airbnb");
+
+        // Restaurants 
+        map.insert("ihop", "ihop");
+        map.insert("bonefish", "bonefish");
+        map.insert("chick-fil-a", "chick-fil-a");
+        map.insert("chipotle", "chipotle");
+        map.insert("mad greens", "mad greens");
+        map.insert("domino's", "dominos");
+        map.insert("dunkin", "dunkin donuts");
+        map.insert("panda express", "panda express");
+        map.insert("noodles & co", "noodles & co");
+        map.insert("olive garden", "olive garden");
+        map.insert("oracl*waffle house", "waffle house");
+        map.insert("bop & gogi", "bop & gogi");
+        map.insert("paypal *domino's", "dominos");
+        
+        // Gas
+        map.insert("safeway fuel", "safeway fuel");
+        map.insert("king soopers fuel", "king soopers fuel");
+        map.insert("conoco", "conoco");
+        map.insert("phillips 66", "phillips 66");
+        map.insert("stop 4 gas", "stop 4 gas");
+        map.insert("circle k", "circle k");
+        map.insert("shell", "shell");
+        map.insert("7-eleven", "7-eleven");
+        map.insert("qt", "quicktrip");
+        map.insert("chevron", "chevron");
+        map.insert("kum&go", "kum&go");
+        
+        
+        // Groceries
+        map.insert("trader joe s" ,"trader joe's");
+        map.insert("publix", "publix");
+        map.insert("safeway #", "safeway");
+        map.insert("king soopers #", "king soopers");
+        
+        map
+    });
+
+    for (prefix, standardized) in DESCRIPTION_MAP.iter() {
+        if raw_description.starts_with(prefix) {
+            return String::from(*standardized);
+        }
+    }
+
+    raw_description
 }
 
 fn parse_record(record: csv::StringRecord, origin: &str) -> Option<BudgetRecord> {
@@ -19,8 +99,9 @@ fn parse_record(record: csv::StringRecord, origin: &str) -> Option<BudgetRecord>
 
             let amount = record[4].parse::<f64>().expect("The USAA record must include an amount");
             let date = NaiveDate::parse_from_str(&record[0], "%Y-%m-%d").expect("The USAA record must include a date");
+            let description = standardize_description(&record[1]);
 
-            let budget_record = BudgetRecord{amount: amount, date: date, card: String::from("USAA"), description: record[1].to_string()};
+            let budget_record = BudgetRecord{amount, date, card: String::from("USAA"), description};
             Some(budget_record)
         },
         "capitalone" => {
@@ -41,8 +122,9 @@ fn parse_record(record: csv::StringRecord, origin: &str) -> Option<BudgetRecord>
             }
 
             let date = NaiveDate::parse_from_str(&record[0], "%Y-%m-%d").expect("The Capital One record must include a date.");
+            let description = standardize_description(&record[3]);
 
-            let budget_record = BudgetRecord{amount: amount, date: date, card: String::from("CapitalOne"), description: record[3].to_string()};
+            let budget_record = BudgetRecord{amount, date, card: String::from("CapitalOne"), description};
             Some(budget_record)
         },
         _ => panic!("You have entered an unknown origin. Options are 'usaa' or 'capitalone'. Your input: {origin}")
@@ -92,7 +174,23 @@ fn main() {
 
     budget_records.append(&mut usaa_records);
     budget_records.append(&mut capital_one_records);
-    println!("Found total budget records: {:?}", budget_records.len());
+    println!("Found total budget records: {}", budget_records.len());
+
+    // Grab the unique standardized descriptions and request additional information for anything that is not stored in the DB already
+    let mut unique_descriptions: HashSet<&String> = HashSet::new();
+    for budget_record in &budget_records {
+        unique_descriptions.insert(&budget_record.description);
+    }
+    println!("Unique Descriptions: {}", unique_descriptions.len());
+
+    // TODO: Parse out unique descriptions which have already been given additional information
+
+    // Request additional information for the remaining descriptions
+    for name in &unique_descriptions {
+        println!("- {}", name)
+    }
+
+
 
     // TODO: Upload normalized record information to self-hosted postgres instance
 
@@ -105,7 +203,7 @@ fn main() {
         } else {
             income_total += budget_record.amount;
         }
-        println!("Individual record: {:?}", budget_record)
+        // println!("Individual record: {:?}", budget_record)
     }
     println!("Income total: {income_total:.2}");
     println!("Spending total: {spending_total:.2}");
