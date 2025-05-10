@@ -1,5 +1,10 @@
 use chrono::NaiveDate;
-use std::{error::Error, fs::File, collections::{HashSet, HashMap}, sync::LazyLock};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    fs::File,
+    sync::LazyLock,
+};
 
 #[derive(Debug)]
 struct BudgetRecord {
@@ -15,7 +20,7 @@ fn standardize_description(description: &str) -> String {
     // TODO: Move to the database for persistence & easier long term management
     static DESCRIPTION_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
         let mut map = HashMap::new();
-        
+
         // Online Stores
         map.insert("amazon", "amazon");
         map.insert("amzn", "amazon");
@@ -42,7 +47,7 @@ fn standardize_description(description: &str) -> String {
         map.insert("hilton", "hilton");
         map.insert("airbnb", "airbnb");
 
-        // Restaurants 
+        // Restaurants
         map.insert("ihop", "ihop");
         map.insert("bonefish", "bonefish");
         map.insert("chick-fil-a", "chick-fil-a");
@@ -56,7 +61,7 @@ fn standardize_description(description: &str) -> String {
         map.insert("oracl*waffle house", "waffle house");
         map.insert("bop & gogi", "bop & gogi");
         map.insert("paypal *domino's", "dominos");
-        
+
         // Gas
         map.insert("safeway fuel", "safeway fuel");
         map.insert("king soopers fuel", "king soopers fuel");
@@ -69,14 +74,13 @@ fn standardize_description(description: &str) -> String {
         map.insert("qt", "quicktrip");
         map.insert("chevron", "chevron");
         map.insert("kum&go", "kum&go");
-        
-        
+
         // Groceries
-        map.insert("trader joe s" ,"trader joe's");
+        map.insert("trader joe s", "trader joe's");
         map.insert("publix", "publix");
         map.insert("safeway #", "safeway");
         map.insert("king soopers #", "king soopers");
-        
+
         map
     });
 
@@ -107,7 +111,7 @@ fn parse_record(record: csv::StringRecord, origin: &str) -> Option<BudgetRecord>
         "capitalone" => {
             let amount: f64;
             // If there is a credit amount, check whether it is a cash back or whether it is a payment onto the card
-            if &record[6] != "" {
+            if !record[6].is_empty() {
                 if &record[3] == "CREDIT-CASH BACK REWARD"{
                     amount = record[6].parse::<f64>().expect("The Capital One record must include an amount");
                 }
@@ -189,8 +193,6 @@ fn main() {
     for name in &unique_descriptions {
         println!("- {}", name)
     }
-
-
 
     // TODO: Upload normalized record information to self-hosted postgres instance
 
