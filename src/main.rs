@@ -5,7 +5,19 @@ use std::{
     fs::File,
     sync::LazyLock,
 };
+mod database;
+use database::db;
 
+#[derive(Debug)]
+struct DatabaseSecrets {
+    username: String,
+    password: String,
+}
+
+#[derive(Debug)]
+struct SecretConfig {
+    database: DatabaseSecrets,
+}
 #[derive(Debug)]
 struct BudgetRecord {
     amount: f64,
@@ -17,7 +29,6 @@ struct BudgetRecord {
 fn standardize_description(description: &str) -> String {
     let raw_description = description.to_lowercase();
     // Hard coded mapping of purchases that contain a UUID in them that I want to standardize
-    // TODO: Move to the database for persistence & easier long term management
     static DESCRIPTION_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
         let mut map = HashMap::new();
 
@@ -155,6 +166,12 @@ fn read_budget_file(
 }
 
 fn main() {
+    // Read in the secret config and ensure it is proper JSON
+    let secret_config: serde_json::Value = serde_json::from_reader(
+        File::open("./config/secret_config.json").expect("Secret config file must exist."),
+    )
+    .expect("Secret config file must be valid JSON");
+
     let raw_usaa_file = File::open("./files/usaa_raw.csv").expect("Hard coded file exists :)");
     let raw_capital_one_file =
         File::open("./files/capital_one_raw.csv").expect("Hard coded file exists :)");
@@ -187,14 +204,14 @@ fn main() {
     }
     println!("Unique Descriptions: {}", unique_descriptions.len());
 
-    // TODO: Parse out unique descriptions which have already been given additional information
-
-    // Request additional information for the remaining descriptions
-    for name in &unique_descriptions {
-        println!("- {}", name)
-    }
-
     // TODO: Upload normalized record information to self-hosted postgres instance
+    let connection = &mut db::establish_connection(secret_config);
+
+    let results = db::select_records(connection);
+    println!("Records: {:?}", results);
+
+    let results = db::select_descriptions(connection);
+    println!("Descriptions: {:?}", results);
 
     // Very very basic analysis
     let mut spending_total: f64 = 0.00;
