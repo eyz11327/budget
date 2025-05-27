@@ -1,3 +1,5 @@
+use crate::BudgetRecord;
+
 use super::models::*;
 use diesel::prelude::*;
 
@@ -29,11 +31,19 @@ pub fn select_records(connection: &mut PgConnection) -> Vec<super::models::Recor
         .select(Record::as_select())
         .load(connection)
         .expect("Error loading records");
-    println!("Directly after records: {:?}", results);
     return results;
 }
 
-pub fn insert_records(connection: &mut PgConnection) -> () {}
+pub fn insert_records<'a>(
+    connection: &mut PgConnection,
+    records: &'a [BudgetRecord],
+) -> QueryResult<usize> {
+    use super::schema::records;
+    let insertable_records: Vec<NewRecord> = records.iter().map(|r| r.into()).collect();
+    diesel::insert_into(records::table)
+        .values(&insertable_records)
+        .execute(connection)
+}
 
 pub fn select_descriptions(connection: &mut PgConnection) -> Vec<super::models::Description> {
     use super::schema::description_information;

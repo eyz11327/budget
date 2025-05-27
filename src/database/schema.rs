@@ -1,6 +1,7 @@
 diesel::table! {
-    budget.records (event_time){
-        amount -> Float,
+    budget.records (id){
+        id -> BigInt,
+        amount -> Double,
         date -> Date,
         card -> Text,
         description -> Text,

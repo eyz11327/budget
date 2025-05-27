@@ -1,3 +1,5 @@
+use crate::BudgetRecord;
+
 use super::schema::{description_information, records};
 use chrono::{DateTime, NaiveDate, Utc};
 use diesel::prelude::*;
@@ -6,20 +8,32 @@ use diesel::prelude::*;
 #[diesel(table_name = records)]
 #[diesel(primary_key())]
 pub struct Record {
-    pub amount: f32,
+    pub id: i64,
+    pub amount: f64,
     pub date: NaiveDate,
     pub card: String,
     pub description: String,
     pub event_time: DateTime<Utc>,
 }
 
-#[derive(Insertable)]
+#[derive(Insertable, Debug)]
 #[diesel(table_name = records)]
 pub struct NewRecord<'a> {
-    pub amount: &'a f32,
-    pub date: &'a NaiveDate,
+    pub amount: f64,
+    pub date: NaiveDate,
     pub card: &'a str,
     pub description: &'a str,
+}
+
+impl<'a> From<&'a BudgetRecord> for NewRecord<'a> {
+    fn from(record: &'a BudgetRecord) -> Self {
+        NewRecord {
+            amount: record.amount,
+            date: record.date,
+            card: &record.card,
+            description: &record.description,
+        }
+    }
 }
 
 #[derive(Queryable, Selectable, Debug)]

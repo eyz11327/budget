@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -9,21 +10,20 @@ mod database;
 use database::db;
 
 #[derive(Debug)]
-struct DatabaseSecrets {
-    username: String,
-    password: String,
-}
-
-#[derive(Debug)]
-struct SecretConfig {
-    database: DatabaseSecrets,
-}
-#[derive(Debug)]
 struct BudgetRecord {
     amount: f64,
     date: NaiveDate,
     card: String,
     description: String,
+}
+impl fmt::Display for BudgetRecord {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Amount: {0} | Date: {1} | Card: {2} | Description: {3}",
+            self.amount, self.date, self.card, self.description
+        )
+    }
 }
 
 fn standardize_description(description: &str) -> String {
@@ -204,11 +204,12 @@ fn main() {
     }
     println!("Unique Descriptions: {}", unique_descriptions.len());
 
-    // TODO: Upload normalized record information to self-hosted postgres instance
     let connection = &mut db::establish_connection(secret_config);
-
-    let results = db::select_records(connection);
-    println!("Records: {:?}", results);
+    let result = db::insert_records(connection, &budget_records);
+    match result {
+        Ok(_) => (),
+        Err(err) => panic!("There was an error {err}"),
+    }
 
     let results = db::select_descriptions(connection);
     println!("Descriptions: {:?}", results);
