@@ -16,5 +16,6 @@ diesel::table! {
         secondary_information -> Nullable<Text>,
         tertiary_information -> Nullable<Text>,
         additional_information -> Nullable<Text>,
+        event_time -> Timestamptz,
     }
 }

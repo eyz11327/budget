@@ -1,4 +1,4 @@
-use crate::BudgetRecord;
+use crate::{BudgetRecord, UploadDescription};
 
 use super::schema::{description_information, records};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -44,6 +44,7 @@ pub struct Description {
     pub secondary_information: Option<String>,
     pub tertiary_information: Option<String>,
     pub additional_information: Option<String>,
+    pub event_time: DateTime<Utc>,
 }
 
 #[derive(Insertable)]
@@ -54,4 +55,16 @@ pub struct NewDescription<'a> {
     pub secondary_information: &'a str,
     pub tertiary_information: &'a str,
     pub additional_information: &'a str,
+}
+
+impl<'a> From<&'a UploadDescription> for NewDescription<'a> {
+    fn from(description: &'a UploadDescription) -> Self {
+        NewDescription {
+            description: &description.description,
+            primary_information: &description.primary_information,
+            secondary_information: &description.secondary_information,
+            tertiary_information: &description.tertiary_information,
+            additional_information: &description.additional_information,
+        }
+    }
 }

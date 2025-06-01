@@ -1,4 +1,4 @@
-use crate::BudgetRecord;
+use crate::{BudgetRecord, UploadDescription};
 
 use super::models::*;
 use diesel::prelude::*;
@@ -55,4 +55,13 @@ pub fn select_descriptions(connection: &mut PgConnection) -> Vec<super::models::
     return results;
 }
 
-pub fn insert_description(connection: &mut PgConnection) -> () {}
+pub fn insert_description<'a>(
+    connection: &mut PgConnection,
+    descriptions: &'a [UploadDescription],
+) -> QueryResult<usize> {
+    use super::schema::description_information;
+    let insertable_records: Vec<NewDescription> = descriptions.iter().map(|r| r.into()).collect();
+    diesel::insert_into(description_information::table)
+        .values(&insertable_records)
+        .execute(connection)
+}

@@ -4,10 +4,15 @@ use std::{
     collections::{HashMap, HashSet},
     error::Error,
     fs::File,
+    io::{self, Write},
     sync::LazyLock,
 };
 mod database;
-use database::db;
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    terminal::{disable_raw_mode, enable_raw_mode},
+};
+use database::{db, models::Description};
 
 #[derive(Debug)]
 struct BudgetRecord {
@@ -24,6 +29,15 @@ impl fmt::Display for BudgetRecord {
             self.amount, self.date, self.card, self.description
         )
     }
+}
+
+#[derive(Debug)]
+struct UploadDescription {
+    description: String,
+    primary_information: String,
+    secondary_information: String,
+    tertiary_information: String,
+    additional_information: String,
 }
 
 fn standardize_description(description: &str) -> String {
@@ -102,6 +116,47 @@ fn standardize_description(description: &str) -> String {
     }
 
     raw_description
+}
+
+fn description_input_parser() -> Option<String> {
+    let mut input = String::new();
+
+    loop {
+        if let Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind: _,
+            state: _,
+        }) = event::read().unwrap()
+        {
+            match (code, modifiers) {
+                (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
+                    println!("\r");
+                    return None;
+                }
+                (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
+                    println!("\r");
+                    return Some("CRTL+A_ABORT".into());
+                }
+                (KeyCode::Enter, _) => {
+                    println!("\r");
+                    return Some(input);
+                }
+                (KeyCode::Char(c), _) => {
+                    print!("{c}");
+                    io::stdout().flush().unwrap();
+                    input.push(c);
+                }
+                (KeyCode::Backspace, _) => {
+                    if input.pop().is_some() {
+                        print!("\x08 \x08");
+                        io::stdout().flush().unwrap();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 fn parse_record(record: csv::StringRecord, origin: &str) -> Option<BudgetRecord> {
@@ -197,22 +252,85 @@ fn main() {
     budget_records.append(&mut capital_one_records);
     println!("Found total budget records: {}", budget_records.len());
 
-    // Grab the unique standardized descriptions and request additional information for anything that is not stored in the DB already
+    let connection = &mut db::establish_connection(secret_config);
+    // let result = db::insert_records(connection, &budget_records);
+    // match result {
+    //     Ok(_) => (),
+    //     Err(err) => panic!("There was an error {err}"),
+    // }
+
+    // Grab the unique standardized descriptions
     let mut unique_descriptions: HashSet<&String> = HashSet::new();
     for budget_record in &budget_records {
         unique_descriptions.insert(&budget_record.description);
     }
     println!("Unique Descriptions: {}", unique_descriptions.len());
 
-    let connection = &mut db::establish_connection(secret_config);
-    let result = db::insert_records(connection, &budget_records);
-    match result {
-        Ok(_) => (),
-        Err(err) => panic!("There was an error {err}"),
+    // Remove the descriptions that already have information stored for them
+    let descriptions = db::select_descriptions(connection);
+    for description in descriptions {
+        unique_descriptions.remove(&description.description);
     }
 
-    let results = db::select_descriptions(connection);
-    println!("Descriptions: {:?}", results);
+    println!("Unique Descriptions: {}", unique_descriptions.len());
+    let mut upload_descriptions: Vec<UploadDescription> = Vec::new();
+    // Request information on the descriptions that remain
+    println!("Requesting information on descriptions that have not been seen before.\nPress CRTL + S to skip the current description, and CRTL + A to skip all the remaining descriptions.");
+    enable_raw_mode().unwrap();
+    'outer: for description in unique_descriptions {
+        println!("\r");
+        println!("Please provide primary information for description '{description}':\r");
+        let primary_information = match description_input_parser() {
+            Some(s) if s == "CRTL+A_ABORT" => break 'outer,
+            Some(s) => s,
+            None => continue, // CRTL+S
+        };
+
+        println!("\r");
+        println!("Please provide secondary information if it exists:\r");
+        let secondary_information = match description_input_parser() {
+            Some(s) if s == "CRTL+A_ABORT" => break 'outer,
+            Some(s) => s,
+            None => continue, // CRTL+S
+        };
+
+        println!("\r");
+        println!("Please provide tertiary information if it exists:\r");
+        let tertiary_information = match description_input_parser() {
+            Some(s) if s == "CRTL+A_ABORT" => break 'outer,
+            Some(s) => s,
+            None => continue, // CRTL+S
+        };
+
+        println!("\r");
+        println!("Please provide additional information if it exists:\r");
+        let additional_information = match description_input_parser() {
+            Some(s) if s == "CRTL+A_ABORT" => break 'outer,
+            Some(s) => s,
+            None => continue, // CRTL+S
+        };
+
+        let upload_description = UploadDescription {
+            description: description.to_string(),
+            primary_information,
+            secondary_information,
+            tertiary_information,
+            additional_information,
+        };
+
+        println!("\r");
+        println!("Description for upload: {:?}\n\n", upload_description);
+        upload_descriptions.push(upload_description);
+    }
+    disable_raw_mode().unwrap();
+
+    println!("{:?}", upload_descriptions);
+    // Upload the new description information
+    let result = db::insert_description(connection, &upload_descriptions);
+    match result {
+        Ok(_) => (),
+        Err(err) => panic!("There was an error uploading the new description information to the database. Error: {err}")
+    }
 
     // Very very basic analysis
     let mut spending_total: f64 = 0.00;
