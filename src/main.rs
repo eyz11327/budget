@@ -2,9 +2,12 @@ use chrono::NaiveDate;
 use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
+    env,
     error::Error,
+    fs,
     fs::File,
-    io::{self, Write},
+    io::{self, ErrorKind, Write},
+    path::PathBuf,
     sync::LazyLock,
 };
 mod database;
@@ -12,7 +15,7 @@ use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     terminal::{disable_raw_mode, enable_raw_mode},
 };
-use database::{db, models::Description};
+use database::db;
 
 #[derive(Debug)]
 struct BudgetRecord {
@@ -201,15 +204,30 @@ fn parse_record(record: csv::StringRecord, origin: &str) -> Option<BudgetRecord>
     }
 }
 
-fn read_budget_file(
-    file: std::fs::File,
-    origin: &str,
-) -> Result<Vec<BudgetRecord>, Box<dyn Error>> {
+fn read_budget_file(path: PathBuf) -> Result<Vec<BudgetRecord>, Box<dyn Error>> {
     let mut ret: Vec<BudgetRecord> = Vec::new();
+
+    let file = File::open(&path)?;
     let mut rdr = csv::ReaderBuilder::new().from_reader(file);
+
+    // Figure out if the budget file is from USAA or Capital One
+    // USAA Headers: Date,Description,Original Description,Category,Amount,Status
+    // Capital One Headers: Transaction Date,Posted Date,Card No.,Description,Category,Debit,Credit
+    let headers = rdr.headers()?;
+    let origin: String;
+    if &headers[0].to_lowercase() == "date" {
+        origin = "usaa".to_string();
+    } else if &headers[0].to_lowercase() == "transaction date" {
+        origin = "capitalone".to_string();
+    } else {
+        println!("Unknown header type found. First header: {:?}", &headers[0]);
+        // TODO: Convert this into an error of some kind.
+        return Ok(ret);
+    }
+
     for csv_record in rdr.records() {
         let raw_record = csv_record?;
-        let budget_record = parse_record(raw_record, origin);
+        let budget_record = parse_record(raw_record, &origin);
         match budget_record {
             Some(budget_record) => ret.push(budget_record),
             _ => continue,
@@ -220,36 +238,91 @@ fn read_budget_file(
     Ok(ret)
 }
 
-fn main() {
-    // Read in the secret config and ensure it is proper JSON
-    let secret_config: serde_json::Value = serde_json::from_reader(
-        File::open("./config/secret_config.json").expect("Secret config file must exist."),
-    )
-    .expect("Secret config file must be valid JSON");
+fn setup() -> Result<(PathBuf, PathBuf, serde_json::Value), Box<dyn Error>> {
+    // Grab the current working directory
+    let cwd = env::current_dir()?;
 
-    let raw_usaa_file = File::open("./files/usaa_raw.csv").expect("Hard coded file exists :)");
-    let raw_capital_one_file =
-        File::open("./files/capital_one_raw.csv").expect("Hard coded file exists :)");
-
-    let mut budget_records: Vec<BudgetRecord> = Vec::new();
-
-    // TODO: For loop over all files in dir, use file name or header to determine origin type
-    let record_information = read_budget_file(raw_usaa_file, "usaa");
-    let mut usaa_records = match record_information {
-        Ok(usaa_records) => usaa_records,
-        Err(error) => panic!("There was an error while parsing the USAA csv. Error: {error}"),
-    };
-
-    let record_information = read_budget_file(raw_capital_one_file, "capitalone");
-    let mut capital_one_records = match record_information {
-        Ok(capital_one_records) => capital_one_records,
-        Err(error) => {
-            panic!("There was an error while parsing the Capital One csv. Error: {error}")
+    // Grab the filepath
+    let default_filepath = cwd.join("files/");
+    let fp = match env::var("BUDGET_FILE_PATH") {
+        Ok(path) => PathBuf::from(path),
+        Err(_e) => {
+            // println!("Error reading env var BUDGET_FILE_PATH. Error: '{e}'. Using default filepath: {:?}", default_filepath);
+            default_filepath
         }
     };
 
-    budget_records.append(&mut usaa_records);
-    budget_records.append(&mut capital_one_records);
+    // Grab secret config
+    let secret_config: serde_json::Value =
+        serde_json::from_reader(File::open(cwd.join("config/secret_config.json"))?)?;
+
+    // Grab the files to be processed
+
+    Ok((cwd, fp, secret_config))
+}
+
+fn main() {
+    // Grab the setup information and ensure it is valid
+    let setup = setup();
+    let (cwd, fp, secret_config) = match setup {
+        Ok((cwd, fp, secret_config)) => (cwd, fp, secret_config),
+        Err(e) => panic!("There was an error during setup. Error: {e}"),
+    };
+
+    println!("CWD: {:?} | File Path: {:?}", cwd, fp);
+
+    // Grab any new budget files to process
+    let budget_files_to_process = fs::read_dir(&fp.join("new/"));
+    let budget_files_to_process = match budget_files_to_process {
+        Ok(budget_files_to_process) => {
+            let budget_files: Vec<fs::DirEntry> = budget_files_to_process
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().is_file())
+                .collect();
+            budget_files
+        }
+        Err(e) => match e.kind() {
+            ErrorKind::NotFound => panic!(
+                "There is no 'new/' directory available at filepath {:?}",
+                fp
+            ),
+            _ => panic!("There was an error determining the files to process. Error: {e}"),
+        },
+    };
+
+    if budget_files_to_process.is_empty() {
+        println!("There are no new budget files to process.");
+        std::process::exit(0);
+    }
+
+    println!(
+        "Found {:?} new budget file(s) to process: {:?}",
+        budget_files_to_process.len(),
+        budget_files_to_process
+    );
+
+    // Process the new budget files
+    let mut budget_records: Vec<BudgetRecord> = Vec::new();
+
+    for budget_file in budget_files_to_process {
+        let path = budget_file.path();
+
+        let record_information = read_budget_file(path);
+        let records = match record_information {
+            Ok(records) => records,
+            Err(e) => {
+                println!(
+                    "There was an error reading budget file {:?}. Error: {:?}",
+                    budget_file.path(),
+                    e
+                );
+                continue;
+            }
+        };
+
+        budget_records.extend(records);
+    }
+
     println!("Found total budget records: {}", budget_records.len());
 
     let connection = &mut db::establish_connection(secret_config);

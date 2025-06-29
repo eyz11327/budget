@@ -24,16 +24,6 @@ pub fn establish_connection(secret_config: serde_json::Value) -> PgConnection {
     })
 }
 
-pub fn select_records(connection: &mut PgConnection) -> Vec<super::models::Record> {
-    use super::schema::records;
-
-    let results = records::table
-        .select(Record::as_select())
-        .load(connection)
-        .expect("Error loading records");
-    return results;
-}
-
 pub fn insert_records<'a>(
     connection: &mut PgConnection,
     records: &'a [BudgetRecord],
