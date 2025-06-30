@@ -43,6 +43,19 @@ struct UploadDescription {
     additional_information: String,
 }
 
+#[derive(Debug)]
+struct InvalidHeader {
+    message: String,
+}
+
+impl fmt::Display for InvalidHeader {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "InvalidHeader: {}", self.message)
+    }
+}
+
+impl Error for InvalidHeader {}
+
 fn standardize_description(description: &str) -> String {
     let raw_description = description.to_lowercase();
     // Hard coded mapping of purchases that contain a UUID in them that I want to standardize
@@ -204,7 +217,7 @@ fn parse_record(record: csv::StringRecord, origin: &str) -> Option<BudgetRecord>
     }
 }
 
-fn read_budget_file(path: PathBuf) -> Result<Vec<BudgetRecord>, Box<dyn Error>> {
+fn read_budget_file(path: &PathBuf) -> Result<Vec<BudgetRecord>, Box<dyn Error>> {
     let mut ret: Vec<BudgetRecord> = Vec::new();
 
     let file = File::open(&path)?;
@@ -220,9 +233,13 @@ fn read_budget_file(path: PathBuf) -> Result<Vec<BudgetRecord>, Box<dyn Error>> 
     } else if &headers[0].to_lowercase() == "transaction date" {
         origin = "capitalone".to_string();
     } else {
-        println!("Unknown header type found. First header: {:?}", &headers[0]);
-        // TODO: Convert this into an error of some kind.
-        return Ok(ret);
+        return Err(Box::new(InvalidHeader {
+            message: format!(
+                "Unknown header type found on file {:?}. First header: {:?}",
+                path, &headers[0]
+            )
+            .into(),
+        }));
     }
 
     for csv_record in rdr.records() {
@@ -296,41 +313,60 @@ fn main() {
     }
 
     println!(
-        "Found {:?} new budget file(s) to process: {:?}",
-        budget_files_to_process.len(),
-        budget_files_to_process
+        "Found {:?} new budget file(s) to process.",
+        budget_files_to_process.len()
     );
 
     // Process the new budget files
     let mut budget_records: Vec<BudgetRecord> = Vec::new();
+    let mut successful_records: Vec<PathBuf> = Vec::new();
 
-    for budget_file in budget_files_to_process {
+    for budget_file in &budget_files_to_process {
         let path = budget_file.path();
 
-        let record_information = read_budget_file(path);
+        let record_information = read_budget_file(&path);
         let records = match record_information {
             Ok(records) => records,
             Err(e) => {
                 println!(
                     "There was an error reading budget file {:?}. Error: {:?}",
-                    budget_file.path(),
-                    e
+                    path, e
                 );
                 continue;
             }
         };
 
         budget_records.extend(records);
+        successful_records.push(path);
     }
 
     println!("Found total budget records: {}", budget_records.len());
+    println!(
+        "Successful record files: {} | Unsuccessful record files: {} ({}% failed)",
+        successful_records.len(),
+        (budget_files_to_process.len() - successful_records.len()),
+        ((1 - (successful_records.len() / budget_files_to_process.len())) * 100)
+    );
 
+    // Connect to the postgres database
     let connection = &mut db::establish_connection(secret_config);
-    // let result = db::insert_records(connection, &budget_records);
-    // match result {
-    //     Ok(_) => (),
-    //     Err(err) => panic!("There was an error {err}"),
-    // }
+
+    // Insert the newly found records
+    if !budget_records.is_empty() {
+        let result = db::insert_records(connection, &budget_records);
+        match result {
+            Ok(_) => (),
+            Err(e) => panic!("There was an error inserting the new records. Error: {e}"),
+        }
+    }
+
+    // Delete the processed files
+    for path in &successful_records {
+        match fs::remove_file(path) {
+            Ok(_) => (),
+            Err(e) => println!("Failed to remove file {:?}. Error: {:?}", path, e),
+        }
+    }
 
     // Grab the unique standardized descriptions
     let mut unique_descriptions: HashSet<&String> = HashSet::new();
@@ -348,7 +384,9 @@ fn main() {
     println!("Unique Descriptions: {}", unique_descriptions.len());
     let mut upload_descriptions: Vec<UploadDescription> = Vec::new();
     // Request information on the descriptions that remain
-    println!("Requesting information on descriptions that have not been seen before.\nPress CRTL + S to skip the current description, and CRTL + A to skip all the remaining descriptions.");
+    println!("Requesting information on descriptions that have not been seen before.");
+    println!("Press CRTL + S to skip the current description, and CRTL + A to skip all the remaining descriptions.");
+
     enable_raw_mode().unwrap();
     'outer: for description in unique_descriptions {
         println!("\r");
@@ -402,7 +440,7 @@ fn main() {
     let result = db::insert_description(connection, &upload_descriptions);
     match result {
         Ok(_) => (),
-        Err(err) => panic!("There was an error uploading the new description information to the database. Error: {err}")
+        Err(e) => panic!("There was an error uploading the new description information to the database. Error: {e}")
     }
 
     // Very very basic analysis
