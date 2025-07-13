@@ -436,6 +436,7 @@ fn main() {
     disable_raw_mode().unwrap();
 
     println!("{:?}", upload_descriptions);
+
     // Upload the new description information
     let result = db::insert_description(connection, &upload_descriptions);
     match result {
@@ -443,7 +444,7 @@ fn main() {
         Err(e) => panic!("There was an error uploading the new description information to the database. Error: {e}")
     }
 
-    // Very very basic analysis
+    // Very very basic initial analysis
     let mut spending_total: f64 = 0.00;
     let mut income_total: f64 = 0.00;
     for budget_record in budget_records {
